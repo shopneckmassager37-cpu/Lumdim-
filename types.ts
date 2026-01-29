@@ -30,8 +30,11 @@ export type UserRole = 'STUDENT' | 'TEACHER';
 export interface UserSettings {
   darkMode: boolean;
   notificationsEnabled: boolean;
-  soundEffects: boolean;
-  showProgressStats: boolean;
+  autoSaveDrafts: boolean;
+  dataSaverMode: boolean;
+  // Fix: Added missing properties to resolve type errors in components/PracticeArea.tsx and App.tsx
+  soundEffects?: boolean;
+  showProgressStats?: boolean;
 }
 
 export interface Badge {

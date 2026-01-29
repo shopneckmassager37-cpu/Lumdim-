@@ -4,20 +4,26 @@ import { Classroom, ClassroomMaterial, Subject, Grade, User, Question, MaterialT
 import { generateSummary, generateQuestions } from '../services/geminiService.ts';
 import { 
   X, Send, FileText, ListChecks, ClipboardList, Upload, BellRing, Bot, Sparkles, Loader2, 
-  Trash2, Plus, CheckCircle2, ChevronRight, School, Search, Calculator, Maximize2, Minimize2
+  Trash2, Plus, CheckCircle2, ChevronRight, School, Search, Calculator, Maximize2, Minimize2, FolderOpen, Shapes, Grid3X3, UserIcon, Users, GraduationCap, ChevronDown
 } from 'lucide-react';
-import RichEditor from './RichEditor.tsx';
+import RichEditor, { RichEditorHandle } from './RichEditor.tsx';
 
 interface ExpandableFieldProps {
   value: string;
   onChange: (v: string) => void;
+  onToggle?: (expanded: boolean) => void;
   placeholder?: string;
   label?: string;
   isTextarea?: boolean;
 }
 
-const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, placeholder, label, isTextarea = false }) => {
+const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onToggle, placeholder, label, isTextarea = false }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const toggleExpand = (val: boolean) => {
+    setIsExpanded(val);
+    if (onToggle) onToggle(val);
+  };
 
   return (
     <div className="space-y-2 relative group">
@@ -26,13 +32,19 @@ const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, plac
         {isExpanded ? (
           <div className="animate-fade-in">
              <button 
-                onClick={() => setIsExpanded(false)}
-                className="absolute top-2 left-2 z-10 p-2 bg-white/80 hover:bg-white rounded-lg shadow-sm text-gray-400 hover:text-primary transition-all flex items-center gap-1 text-[10px] font-bold"
+                onClick={() => toggleExpand(false)}
+                className="absolute top-2 left-2 z-10 p-2 bg-white/80 hover:bg-white rounded-lg shadow-sm text-gray-400 hover:text-primary transition-all flex items-center justify-center w-10 h-10"
+                title="סגור הרחבה"
              >
-                <Minimize2 size={14} />
-                סגור הרחבה
+                <Minimize2 size={18} />
              </button>
-             <RichEditor value={value} onChange={onChange} placeholder={placeholder} minHeight="200px" />
+             <RichEditor 
+                value={value} 
+                onChange={onChange} 
+                placeholder={placeholder} 
+                minHeight="200px" 
+                minimalMode={false}
+             />
           </div>
         ) : (
           <div className="relative">
@@ -53,7 +65,7 @@ const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, plac
                />
              )}
              <button 
-                onClick={() => setIsExpanded(true)}
+                onClick={() => toggleExpand(true)}
                 className="absolute left-2 top-2 p-2 text-gray-300 hover:text-primary transition-all opacity-0 group-hover:opacity-100"
                 title="הרחבה לעיצוב עשיר ומתמטיקה"
              >
@@ -78,7 +90,11 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
   const [loading, setLoading] = useState(false);
   const [showClassSelector, setShowClassSelector] = useState(false);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
+  const [selectedGrade, setSelectedGrade] = useState<Grade>(Grade.GRADE_7);
   const [searchTerm, setSearchTerm] = useState('');
+  const editorRef = useRef<RichEditorHandle>(null);
+
+  const [expandedOptionMap, setExpandedOptionMap] = useState<Record<string, boolean>>({});
 
   const [draftMaterial, setDraftMaterial] = useState<Partial<ClassroomMaterial>>({
     type: 'SUMMARY',
@@ -121,8 +137,24 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
 
   const isFileOnly = draftMaterial.type === 'UPLOADED_FILE';
   const isTest = draftMaterial.type === 'TEST';
-  const isUpcoming = draftMaterial.type === 'UPCOMING_TEST';
   const isAssignment = draftMaterial.type === 'ASSIGNMENT';
+
+  const createFinalMaterial = (): ClassroomMaterial => {
+    const finalTitle = draftMaterial.title || (draftMaterial.teacherAttachments?.[0]?.name || 'קובץ חדש');
+    return {
+      id: Date.now().toString(),
+      title: finalTitle,
+      type: draftMaterial.type as MaterialType,
+      content: draftMaterial.content || '',
+      questions: draftMaterial.questions || [],
+      dueDate: draftMaterial.dueDate,
+      timestamp: Date.now(),
+      isPublished: true,
+      teacherAttachments: draftMaterial.teacherAttachments || [],
+      submissions: [],
+      autoGradeByAI: draftMaterial.autoGradeByAI
+    };
+  };
 
   const handlePrePublish = () => {
     if (!draftMaterial.title && !isFileOnly) {
@@ -130,8 +162,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
       return;
     }
     
-    // Validation: Check for due date on relevant types
-    const needsDueDate = ['TEST', 'ASSIGNMENT', 'UPCOMING_TEST'].includes(draftMaterial.type || '');
+    const needsDueDate = ['TEST', 'ASSIGNMENT'].includes(draftMaterial.type || '');
     if (needsDueDate && !draftMaterial.dueDate) {
         alert("חייב לסמן תאריך יעד כדי לפרסם תוכן זה לכיתה.");
         return;
@@ -145,23 +176,11 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
         alert("נא לבחור לפחות כיתה אחת לפרסום");
         return;
     }
+    onPublish(createFinalMaterial(), selectedClassIds);
+  };
 
-    const finalTitle = draftMaterial.title || (draftMaterial.teacherAttachments?.[0]?.name || 'קובץ חדש');
-    const newMat: ClassroomMaterial = {
-      id: Date.now().toString(),
-      title: finalTitle,
-      type: draftMaterial.type as MaterialType,
-      content: draftMaterial.content || '',
-      questions: draftMaterial.questions || [],
-      dueDate: draftMaterial.dueDate,
-      timestamp: Date.now(),
-      isPublished: true,
-      teacherAttachments: draftMaterial.teacherAttachments || [],
-      submissions: [],
-      autoGradeByAI: draftMaterial.autoGradeByAI
-    };
-
-    onPublish(newMat, selectedClassIds);
+  const handleSaveToRepositoryOnly = () => {
+    onPublish(createFinalMaterial(), []);
   };
 
   const filteredClassrooms = classrooms.filter(c => {
@@ -184,12 +203,13 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
           className="bg-primary text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-600 disabled:opacity-30 transition-all flex items-center gap-2"
         >
           <Send size={18} />
-          בחר כיתות לפרסום
+          פרסם לכיתות
         </button>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto p-6 space-y-8 no-scrollbar">
+          
           <div className="space-y-4">
             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">סוג התוכן</label>
             <div className="grid gap-2">
@@ -197,14 +217,13 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                 { id: 'SUMMARY', label: 'סיכום לימודי', icon: FileText, color: 'blue' },
                 { id: 'TEST', label: 'מבחן/תרגול', icon: ListChecks, color: 'indigo' },
                 { id: 'ASSIGNMENT', label: 'מטלה להגשה', icon: ClipboardList, color: 'emerald' },
-                { id: 'UPCOMING_TEST', label: 'התראה על מבחן', icon: BellRing, color: 'orange' },
                 { id: 'UPLOADED_FILE', label: 'קובץ', icon: Upload, color: 'blue' }
               ].map(t => (
                 <button 
                   key={t.id}
                   onClick={() => {
                     const newType = t.id as MaterialType;
-                    const needsDate = ['TEST', 'ASSIGNMENT', 'UPCOMING_TEST'].includes(newType);
+                    const needsDate = ['TEST', 'ASSIGNMENT'].includes(newType);
                     let newDueDate = draftMaterial.dueDate;
                     if (needsDate && !newDueDate) {
                         const d = new Date();
@@ -223,22 +242,58 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
             </div>
           </div>
 
-          {(isTest || isAssignment || isUpcoming) && (
-            <div className="space-y-4 pt-4 border-t border-gray-100">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">תאריך יעד / מבחן</label>
-                <input 
-                  type="date" 
-                  value={draftMaterial.dueDate || ''} 
-                  onChange={(e) => setDraftMaterial(prev => ({...prev, dueDate: e.target.value}))} 
-                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-sm outline-none focus:border-primary transition-all"
-                />
-            </div>
-          )}
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">עזרים חכמים</label>
+             <div className="grid gap-3">
+               {!isFileOnly && (
+                 <button 
+                  onClick={async () => {
+                    if (!draftMaterial.title) return;
+                    setLoading(true);
+                    try {
+                      if (isTest) {
+                        const total = aiMcqCount + aiOpenCount;
+                        const defaultSubject = classrooms[0]?.subject || Subject.MATH;
+                        const qs = await generateQuestions(defaultSubject, selectedGrade, draftMaterial.title, [], total, 'MEDIUM', aiMcqCount, aiOpenCount);
+                        setDraftMaterial(prev => ({...prev, questions: qs}));
+                      } else {
+                        const defaultSubject = classrooms[0]?.subject || Subject.MATH;
+                        const content = await generateSummary(defaultSubject, selectedGrade, draftMaterial.title);
+                        setDraftMaterial(prev => ({...prev, content}));
+                      }
+                    } finally { setLoading(false); }
+                  }}
+                  disabled={loading || !draftMaterial.title}
+                  className="w-full p-4 rounded-2xl bg-gray-900 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-20"
+                 >
+                   {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-yellow-400" />}
+                   <span>ייצר תוכן AI</span>
+                 </button>
+               )}
+             </div>
+          </div>
+
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">שכבת לימוד (רמה)</label>
+             <div className="relative">
+                <select 
+                  value={selectedGrade}
+                  onChange={(e) => setSelectedGrade(e.target.value as Grade)}
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-black text-sm outline-none focus:border-primary transition-all appearance-none cursor-pointer"
+                >
+                  {Object.values(Grade).map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                  <ChevronDown size={18} />
+                </div>
+             </div>
+             <p className="text-[10px] text-gray-400 font-bold px-2 italic">רמת ה-AI תותאם לשכבה הנבחרת</p>
+          </div>
 
           {isTest && (
             <div className="space-y-6 pt-4 border-t border-gray-100">
               <div className="space-y-4">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">הגדרות שאלות (AI)</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">הגדרות מבחן (AI)</label>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
                     <span className="text-[10px] font-black text-gray-400 block mb-1">אמריקאיות</span>
@@ -250,38 +305,49 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                   </div>
                 </div>
               </div>
+
+              <div className="space-y-4">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">שיטת בדיקה וציון</label>
+                  <div className="grid gap-2">
+                      <button 
+                        onClick={() => setDraftMaterial(prev => ({...prev, autoGradeByAI: true}))}
+                        className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all text-right ${draftMaterial.autoGradeByAI ? 'border-primary bg-blue-50 text-primary font-black shadow-sm' : 'border-gray-50 text-gray-400 font-bold'}`}
+                      >
+                          <div className="flex items-center gap-3">
+                              <Bot size={18}/>
+                              <div className="text-right">
+                                  <span className="block text-sm">בדיקת AI</span>
+                              </div>
+                          </div>
+                          {draftMaterial.autoGradeByAI && <CheckCircle2 size={16}/>}
+                      </button>
+                      <button 
+                        onClick={() => setDraftMaterial(prev => ({...prev, autoGradeByAI: false}))}
+                        className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all text-right ${!draftMaterial.autoGradeByAI ? 'border-primary bg-blue-50 text-primary font-black shadow-sm' : 'border-gray-50 text-gray-400 font-bold'}`}
+                      >
+                          <div className="flex items-center gap-3">
+                              <UserIcon size={18}/>
+                              <div className="text-right">
+                                  <span className="block text-sm">בדיקת מורה</span>
+                              </div>
+                          </div>
+                          {!draftMaterial.autoGradeByAI && <CheckCircle2 size={16}/>}
+                      </button>
+                  </div>
+              </div>
             </div>
           )}
 
-          {!isFileOnly && !isUpcoming && (
-             <div className="space-y-4 pt-4 border-t border-gray-100">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">עזרים חכמים (AI)</label>
-                <button 
-                 onClick={async () => {
-                   if (!draftMaterial.title) return;
-                   setLoading(true);
-                   try {
-                     if (isTest) {
-                       const total = aiMcqCount + aiOpenCount;
-                       const defaultSubject = classrooms[0]?.subject || Subject.MATH;
-                       const defaultGrade = classrooms[0]?.grade || Grade.GRADE_10;
-                       const qs = await generateQuestions(defaultSubject, defaultGrade, draftMaterial.title, [], total, 'MEDIUM', aiMcqCount, aiOpenCount);
-                       setDraftMaterial(prev => ({...prev, questions: qs}));
-                     } else {
-                       const defaultSubject = classrooms[0]?.subject || Subject.MATH;
-                       const defaultGrade = classrooms[0]?.grade || Grade.GRADE_10;
-                       const content = await generateSummary(defaultSubject, defaultGrade, draftMaterial.title);
-                       setDraftMaterial(prev => ({...prev, content}));
-                     }
-                   } finally { setLoading(false); }
-                 }}
-                 disabled={loading || !draftMaterial.title}
-                 className="w-full p-4 rounded-2xl bg-gradient-to-br from-gray-900 to-black text-white font-black text-xs flex items-center justify-center gap-2 shadow-xl hover:-translate-y-1 transition-all disabled:opacity-20"
-                >
-                  {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-yellow-400" />}
-                  <span>ייצר תוכן עם AI</span>
-                </button>
-             </div>
+          {(isTest || isAssignment) && (
+            <div className="space-y-4 pt-4 border-t border-gray-100">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">תאריך יעד אחרון</label>
+                <input 
+                  type="date" 
+                  value={draftMaterial.dueDate || ''} 
+                  onChange={(e) => setDraftMaterial(prev => ({...prev, dueDate: e.target.value}))} 
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-sm outline-none focus:border-primary transition-all"
+                />
+            </div>
           )}
         </div>
 
@@ -291,7 +357,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
               type="text" 
               value={draftMaterial.title}
               onChange={e => setDraftMaterial(prev => ({...prev, title: e.target.value}))}
-              placeholder={isFileOnly ? "כותרת לקובץ (אופציונלי)..." : "כותרת התוכן..."}
+              placeholder={isFileOnly ? "כותרת לקובץ..." : "כותרת התוכן..."}
               className="w-full bg-transparent border-none text-5xl font-black text-gray-900 placeholder:text-gray-200 outline-none"
             />
 
@@ -300,7 +366,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                     <div className="bg-blue-50 p-8 rounded-full text-blue-500"><Upload size={64}/></div>
                     <div>
                         <h3 className="text-3xl font-black text-gray-800">העלאת קובץ גלובלי</h3>
-                        <p className="text-gray-400 font-bold text-lg mt-2">תוכל לבחור לאילו כיתות לשייך את הקובץ בסיום.</p>
+                        <p className="text-gray-400 font-bold text-lg mt-2">הקובץ יישמר ותוכל לשייך אותו לכיתות השונות.</p>
                     </div>
                     <button onClick={() => fileInputRef.current?.click()} className="bg-gray-900 text-white px-12 py-4 rounded-2xl font-black text-xl shadow-xl hover:bg-black transition-all">בחר קובץ להעלאה</button>
                     <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
@@ -315,50 +381,55 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                   </div>
                 </div>
                 <div className="space-y-6">
-                  {draftMaterial.questions?.map((q, i) => (
-                    <div key={q.id} className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 relative group animate-fade-in">
-                      <button onClick={() => setDraftMaterial(prev => ({...prev, questions: prev.questions?.filter(item => item.id !== q.id)}))} className="absolute top-6 left-6 text-gray-200 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
-                      <div className="mb-6">
-                        <ExpandableField 
-                          label={`שאלה ${i+1}`}
-                          value={q.text} 
-                          onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].text = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
-                          placeholder="כתוב את השאלה כאן..." 
-                          isTextarea
-                        />
-                      </div>
-                      {q.type === 'OPEN' ? (
-                        <div className="space-y-2">
-                           <ExpandableField 
-                            label="תשובת מודל"
-                            value={q.modelAnswer || ''} 
-                            onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].modelAnswer = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
-                            placeholder="תשובת מודל..." 
+                  {draftMaterial.questions?.map((q, i) => {
+                    const anyOptionExpanded = q.options?.some((_, oi) => expandedOptionMap[`${q.id}-${oi}`]) || false;
+                    return (
+                      <div key={q.id} className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 relative group animate-fade-in">
+                        <button onClick={() => setDraftMaterial(prev => ({...prev, questions: prev.questions?.filter(item => item.id !== q.id)}))} className="absolute top-6 left-6 text-gray-200 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
+                        <div className="mb-6">
+                          <ExpandableField 
+                            label={`שאלה ${i+1}`}
+                            value={q.text} 
+                            onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].text = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
+                            placeholder="כתוב את השאלה כאן..." 
                             isTextarea
                           />
                         </div>
-                      ) : (
-                        <div className="grid md:grid-cols-2 gap-4">
-                          {q.options.map((opt, oi) => (
-                            <div key={oi} className={`flex items-start gap-3 p-3 rounded-2xl border-2 transition-all ${q.correctIndex === oi ? 'border-green-500 bg-green-50' : 'border-gray-50'}`}>
-                              <input type="radio" className="mt-4" checked={q.correctIndex === oi} onChange={() => { const newQs = [...draftMaterial.questions!]; newQs[i].correctIndex = oi; setDraftMaterial(prev => ({...prev, questions: newQs})); }} />
-                              <div className="flex-1">
-                                <ExpandableField 
-                                  value={opt} 
-                                  onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].options[oi] = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
-                                  placeholder={`אופציה ${oi+1}`} 
-                                />
+                        {q.type === 'OPEN' ? (
+                          <div className="space-y-2">
+                             <ExpandableField 
+                              label="תשובת מודל"
+                              value={q.modelAnswer || ''} 
+                              onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].modelAnswer = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
+                              placeholder="תשובת מודל..." 
+                              isTextarea
+                            />
+                          </div>
+                        ) : (
+                          <div className={`grid gap-4 transition-all duration-300 ${anyOptionExpanded ? 'grid-cols-1' : 'md:grid-cols-2'}`}>
+                            {(q.options || []).map((opt, oi) => (
+                              <div key={oi} className={`flex items-start gap-3 p-3 rounded-2xl border-2 transition-all ${q.correctIndex === oi ? 'border-green-500 bg-green-50' : 'border-gray-50'} ${expandedOptionMap[`${q.id}-${oi}`] ? 'col-span-full' : ''}`}>
+                                <input type="radio" className="mt-4" checked={q.correctIndex === oi} onChange={() => { const newQs = [...draftMaterial.questions!]; newQs[i].correctIndex = oi; setDraftMaterial(prev => ({...prev, questions: newQs})); }} />
+                                <div className="flex-1">
+                                  <ExpandableField 
+                                    value={opt} 
+                                    onToggle={(expanded) => setExpandedOptionMap(prev => ({...prev, [`${q.id}-${oi}`]: expanded}))}
+                                    onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].options[oi] = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
+                                    placeholder={`אופציה ${oi+1}`} 
+                                  />
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
               <RichEditor 
+                ref={editorRef}
                 value={draftMaterial.content || ''} 
                 onChange={content => setDraftMaterial(prev => ({...prev, content}))} 
                 placeholder="כתוב כאן את תוכן התוכן שיוצג לתלמידים..." 
@@ -398,7 +469,6 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                  <div className="text-center py-20 flex flex-col items-center gap-4">
                    <School size={48} className="text-gray-200" />
                    <p className="text-gray-400 font-bold">לא נמצאו כיתות המשויכות אליך.</p>
-                   <p className="text-xs text-gray-400">ודא שהקמת כיתות בדף הבית לפני הפרסום.</p>
                  </div>
                ) : filteredClassrooms.length === 0 ? (
                  <div className="text-center py-10 text-gray-400 font-bold">לא נמצאו כיתות תואמות לחיפוש</div>
@@ -429,16 +499,25 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                )}
             </div>
 
-            <div className="p-8 border-t border-gray-100 bg-gray-50 flex gap-4">
+            <div className="p-8 border-t border-gray-100 bg-gray-50 flex flex-col md:flex-row gap-4">
                <button 
                 onClick={handleFinalPublish} 
                 disabled={selectedClassIds.length === 0}
-                className="flex-1 bg-primary text-white py-5 rounded-2xl font-black text-xl shadow-xl hover:bg-blue-600 disabled:opacity-30 transition-all flex items-center justify-center gap-2"
+                className="flex-[2] bg-primary text-white py-5 rounded-2xl font-black text-xl shadow-xl hover:bg-blue-600 disabled:opacity-30 transition-all flex items-center justify-center gap-2"
                >
                  <span>פרסם ל-{selectedClassIds.length} כיתות</span>
                  <Send size={20}/>
                </button>
-               <button onClick={() => setShowClassSelector(false)} className="px-10 py-5 bg-white border border-gray-200 rounded-2xl font-black text-gray-500 hover:bg-gray-100">ביטול</button>
+               
+               <button 
+                onClick={handleSaveToRepositoryOnly}
+                className="flex-1 bg-gray-900 text-white py-5 rounded-2xl font-black text-sm shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2"
+               >
+                 <FolderOpen size={18} />
+                 <span>שמירה במאגר בלבד</span>
+               </button>
+
+               <button onClick={() => setShowClassSelector(false)} className="px-6 py-5 bg-white border border-gray-200 rounded-2xl font-black text-gray-500 hover:bg-gray-100 text-sm">ביטול</button>
             </div>
           </div>
         </div>

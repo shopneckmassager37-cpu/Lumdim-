@@ -379,34 +379,42 @@ const App: React.FC = () => {
 
   const handleGlobalPublish = (material: ClassroomMaterial, targetClassIds: string[]) => {
     const currentClassrooms = JSON.parse(localStorage.getItem(DB_KEY) || '[]');
-    const updatedClassrooms = currentClassrooms.map((c: Classroom) => {
-      if (targetClassIds.includes(c.id)) {
-        return { ...c, materials: [material, ...c.materials] };
-      }
-      return c;
-    });
-    localStorage.setItem(DB_KEY, JSON.stringify(updatedClassrooms));
-    window.dispatchEvent(new Event('lumdim-db-updated'));
     
-    const refClass = currentClassrooms.find((c: Classroom) => targetClassIds.includes(c.id));
-    if (refClass) {
-        handleAddHistoryItem({
-            id: material.id,
-            timestamp: material.timestamp,
-            subject: refClass.subject,
-            grade: refClass.grade,
-            type: material.type === 'SUMMARY' ? 'SUMMARY' : 'PRACTICE',
-            title: `העלאת תוכן גלובלי: ${material.title}`,
-            content: material.content,
-            isCorrect: true,
-            classId: targetClassIds[0],
-            details: material
+    if (targetClassIds.length > 0) {
+        const updatedClassrooms = currentClassrooms.map((c: Classroom) => {
+          if (targetClassIds.includes(c.id)) {
+            return { ...c, materials: [material, ...c.materials] };
+          }
+          return c;
         });
+        localStorage.setItem(DB_KEY, JSON.stringify(updatedClassrooms));
+        window.dispatchEvent(new Event('lumdim-db-updated'));
     }
+    
+    const refClass = targetClassIds.length > 0 
+        ? currentClassrooms.find((c: Classroom) => targetClassIds.includes(c.id))
+        : null;
+
+    handleAddHistoryItem({
+        id: material.id,
+        timestamp: material.timestamp,
+        subject: refClass?.subject || Subject.MATH,
+        grade: refClass?.grade || Grade.GRADE_10,
+        type: material.type === 'SUMMARY' ? 'SUMMARY' : 'PRACTICE',
+        title: targetClassIds.length > 0 ? `העלאת תוכן גלובלי: ${material.title}` : `שמירה במאגר: ${material.title}`,
+        content: material.content,
+        isCorrect: true,
+        classId: targetClassIds[0],
+        details: material
+    });
 
     setIsGlobalEditorOpen(false);
     setInitialGlobalEditorData(null);
-    alert(`התוכן פורסם בהצלחה ל-${targetClassIds.length} כיתות!`);
+    if (targetClassIds.length > 0) {
+        alert(`התוכן פורסם בהצלחה ל-${targetClassIds.length} כיתות!`);
+    } else {
+        alert(`התוכן נשמר במאגר החומרים שלך!`);
+    }
     loadClassrooms();
   };
 
@@ -521,12 +529,14 @@ const App: React.FC = () => {
                       setInitialLessonPlan(item.details);
                       setInitialTeacherTab('PLANNER');
                       setViewMode('DASHBOARD');
-                  } else if (item.classId) {
+                  } else if (item.details) {
+                      // CRITICAL FIX: Any summary/test/file from repository MUST open in GlobalContentEditor
                       setInitialGlobalEditorData(item.details);
                       setIsGlobalEditorOpen(true);
                   } else if (item.type === 'EXAM_CHECK') {
                       alert("צפייה בדוח בדיקת מבחן תתווסף בגרסה הבאה. בינתיים הפריט נשמר במאגר.");
                   } else {
+                      // Legacy or Student view fallback
                       setSelectedSubject(item.subject);
                       setSelectedGrade(item.grade);
                       setActiveTab('resources');

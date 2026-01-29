@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { GraduationCap, History, ChevronDown, Settings, LayoutGrid, User, School, LogOut, UserCircle, Trophy, CalendarDays, FolderOpen, Bell } from 'lucide-react';
 import { Grade, UserRole, UserSettings } from '../types';
@@ -61,7 +62,7 @@ const Header: React.FC<HeaderProps> = ({
           </button>
           
           <div className="flex items-center gap-1 md:gap-3">
-             {notificationsEnabled && (
+             {notificationsEnabled && isTeacher && (
                 <button
                   onClick={onNotificationsClick}
                   className="relative p-2 text-gray-400 hover:text-primary hover:bg-gray-100 rounded-full transition-all mr-1"

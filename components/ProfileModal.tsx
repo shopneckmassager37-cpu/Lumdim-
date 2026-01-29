@@ -1,5 +1,6 @@
+
 import React, { useState, useRef } from 'react';
-import { X, User, Save, Camera, Trash2, Settings, UserCircle, Bell, Moon, Sun, Volume2, BarChart2, ShieldCheck } from 'lucide-react';
+import { X, User, Save, Camera, Trash2, Settings, UserCircle, Bell, Moon, Sun, Database, History, ShieldCheck } from 'lucide-react';
 import { UserSettings } from '../types.ts';
 
 interface ProfileModalProps {
@@ -19,8 +20,8 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, userName, 
   const [settings, setSettings] = useState<UserSettings>(userSettings || {
     darkMode: false,
     notificationsEnabled: true,
-    soundEffects: true,
-    showProgressStats: true
+    autoSaveDrafts: true,
+    dataSaverMode: false
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -142,7 +143,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, userName, 
             ) : (
                 <div className="animate-fade-in space-y-8">
                     <div className="space-y-6">
-                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest pr-1">העדפות ממשק ותצוגה</h4>
+                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest pr-1">העדפות ממשק ותפעול</h4>
                         
                         <div className="grid gap-4">
                             <div className="flex items-center justify-between p-5 bg-gray-50 rounded-2xl border border-gray-100 transition-all">
@@ -184,43 +185,43 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, userName, 
                             <div className="flex items-center justify-between p-5 bg-gray-50 rounded-2xl border border-gray-100 transition-all">
                                 <div className="flex items-center gap-4">
                                     <div className="p-2 bg-white rounded-lg text-gray-500 shadow-sm">
-                                        <Volume2 size={18}/>
+                                        <History size={18}/>
                                     </div>
                                     <div>
-                                        <h5 className="font-bold text-gray-800 text-sm">אפקטים קוליים</h5>
-                                        <p className="text-[10px] text-gray-400 font-bold">צלילי משוב בתרגול ובממשק</p>
+                                        <h5 className="font-bold text-gray-800 text-sm">שמירה אוטומטית של טיוטות</h5>
+                                        <p className="text-[10px] text-gray-400 font-bold">שמירת שינויים בעורך תוך כדי עבודה</p>
                                     </div>
                                 </div>
                                 <button 
-                                    onClick={() => toggleSetting('soundEffects')}
-                                    className={`w-12 h-6 rounded-full transition-all relative ${settings.soundEffects ? 'bg-primary' : 'bg-gray-300'}`}
+                                    onClick={() => toggleSetting('autoSaveDrafts')}
+                                    className={`w-12 h-6 rounded-full transition-all relative ${settings.autoSaveDrafts ? 'bg-primary' : 'bg-gray-300'}`}
                                 >
-                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.soundEffects ? 'left-1' : 'left-7'}`} />
+                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.autoSaveDrafts ? 'left-1' : 'left-7'}`} />
                                 </button>
                             </div>
 
                             <div className="flex items-center justify-between p-5 bg-gray-50 rounded-2xl border border-gray-100 transition-all">
                                 <div className="flex items-center gap-4">
                                     <div className="p-2 bg-white rounded-lg text-gray-500 shadow-sm">
-                                        <BarChart2 size={18}/>
+                                        <Database size={18}/>
                                     </div>
                                     <div>
-                                        <h5 className="font-bold text-gray-800 text-sm">סטטיסטיקה בלוח הבקרה</h5>
-                                        <p className="text-[10px] text-gray-400 font-bold">הצגת גרפי התקדמות בדף הבית</p>
+                                        <h5 className="font-bold text-gray-800 text-sm">מצב חיסכון בנתונים</h5>
+                                        <p className="text-[10px] text-gray-400 font-bold">צמצום תעבורת רשת בחיבורים איטיים</p>
                                     </div>
                                 </div>
                                 <button 
-                                    onClick={() => toggleSetting('showProgressStats')}
-                                    className={`w-12 h-6 rounded-full transition-all relative ${settings.showProgressStats ? 'bg-primary' : 'bg-gray-300'}`}
+                                    onClick={() => toggleSetting('dataSaverMode')}
+                                    className={`w-12 h-6 rounded-full transition-all relative ${settings.dataSaverMode ? 'bg-primary' : 'bg-gray-300'}`}
                                 >
-                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.showProgressStats ? 'left-1' : 'left-7'}`} />
+                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.dataSaverMode ? 'left-1' : 'left-7'}`} />
                                 </button>
                             </div>
                         </div>
                     </div>
 
                     <div className="bg-gray-100 p-6 rounded-[2rem] text-center border border-gray-200">
-                        <p className="text-gray-500 text-xs font-bold">גרסה: 1.0.5 (Functional Build)</p>
+                        <p className="text-gray-500 text-xs font-bold">גרסה: 1.1.2 (System Utility Update)</p>
                     </div>
                 </div>
             )}

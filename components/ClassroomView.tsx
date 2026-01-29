@@ -15,13 +15,19 @@ const DB_KEY = 'lumdim_global_database_v1';
 interface ExpandableFieldProps {
   value: string;
   onChange: (v: string) => void;
+  onToggle?: (expanded: boolean) => void;
   placeholder?: string;
   label?: string;
   isTextarea?: boolean;
 }
 
-const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, placeholder, label, isTextarea = false }) => {
+const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onToggle, placeholder, label, isTextarea = false }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const toggleExpand = (val: boolean) => {
+    setIsExpanded(val);
+    if (onToggle) onToggle(val);
+  };
 
   return (
     <div className="space-y-2 relative group">
@@ -30,13 +36,19 @@ const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, plac
         {isExpanded ? (
           <div className="animate-fade-in">
              <button 
-                onClick={() => setIsExpanded(false)}
-                className="absolute top-2 left-2 z-10 p-2 bg-white/80 hover:bg-white rounded-lg shadow-sm text-gray-400 hover:text-primary transition-all flex items-center gap-1 text-[10px] font-bold"
+                onClick={() => toggleExpand(false)}
+                className="absolute top-2 left-2 z-10 p-2 bg-white/80 hover:bg-white rounded-lg shadow-sm text-gray-400 hover:text-primary transition-all flex items-center justify-center w-10 h-10"
+                title="סגור הרחבה"
              >
-                <Minimize2 size={14} />
-                סגור הרחבה
+                <Minimize2 size={18} />
              </button>
-             <RichEditor value={value} onChange={onChange} placeholder={placeholder} minHeight="200px" />
+             <RichEditor 
+                value={value} 
+                onChange={onChange} 
+                placeholder={placeholder} 
+                minHeight="200px" 
+                minimalMode={false}
+             />
           </div>
         ) : (
           <div className="relative">
@@ -57,7 +69,7 @@ const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, plac
                />
              )}
              <button 
-                onClick={() => setIsExpanded(true)}
+                onClick={() => toggleExpand(true)}
                 className="absolute left-2 top-2 p-2 text-gray-300 hover:text-primary transition-all opacity-0 group-hover:opacity-100"
                 title="הרחבה לעיצוב עשיר ומתמטיקה"
              >
@@ -112,6 +124,9 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
     targetStudentIds: [],
     autoGradeByAI: true
   });
+
+  // Track which option in which question is expanded to change layout
+  const [expandedOptionMap, setExpandedOptionMap] = useState<Record<string, boolean>>({});
 
   const [aiMcqCount, setAiMcqCount] = useState(3);
   const [aiOpenCount, setAiOpenCount] = useState(2);
@@ -334,7 +349,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                 if (w > h && w > MAX) { h *= MAX/w; w = MAX; }
                 else if (h > w && h > MAX) { w *= MAX/h; h = MAX; }
                 canvas.width = w; canvas.height = h;
-                canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
                 const compressed = canvas.toDataURL('image/jpeg', 0.6);
                 setChatAttachment({ name: file.name, data: compressed.split(',')[1], mimeType: 'image/jpeg', preview: compressed });
             };
@@ -1016,6 +1030,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                 <div className="space-y-4">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">העלאת הקובץ</label>
                     <button 
+                        type="button"
                         onClick={() => fileInputRef.current?.click()}
                         className="w-full py-4 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center gap-2 text-gray-400 hover:border-primary hover:text-primary transition-all"
                     >
@@ -1030,6 +1045,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                <div className="space-y-4 pt-4 border-t border-gray-100">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">עזרים חכמים (AI)</label>
                   <button 
+                   type="button"
                    onClick={async () => {
                      if (!draftMaterial.title) return;
                      setLoading(true);
@@ -1083,46 +1099,51 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                     </div>
                   </div>
                   <div className="space-y-6">
-                    {draftMaterial.questions?.map((q, i) => (
-                      <div key={q.id} className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 relative group animate-fade-in">
-                        <button onClick={() => setDraftMaterial({...draftMaterial, questions: draftMaterial.questions?.filter(item => item.id !== q.id)})} className="absolute top-6 left-6 text-gray-200 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
-                        <div className="mb-6">
-                           <ExpandableField 
-                            label={`שאלה ${i+1}`}
-                            value={q.text} 
-                            onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].text = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
-                            placeholder="כתוב את השאלה כאן..." 
-                            isTextarea
-                          />
-                        </div>
-                        {q.type === 'OPEN' ? (
-                          <div className="space-y-2">
-                            <ExpandableField 
-                              label="תשובת מודל"
-                              value={q.modelAnswer || ''} 
-                              onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].modelAnswer = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
-                              placeholder="תשובת מודל..." 
+                    {draftMaterial.questions?.map((q, i) => {
+                      const anyOptionExpanded = q.options?.some((_, oi) => expandedOptionMap[`${q.id}-${oi}`]) || false;
+                      
+                      return (
+                        <div key={q.id} className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 relative group animate-fade-in">
+                          <button onClick={() => setDraftMaterial({...draftMaterial, questions: draftMaterial.questions?.filter(item => item.id !== q.id)})} className="absolute top-6 left-6 text-gray-200 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
+                          <div className="mb-6">
+                             <ExpandableField 
+                              label={`שאלה ${i+1}`}
+                              value={q.text} 
+                              onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].text = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
+                              placeholder="כתוב את השאלה כאן..." 
                               isTextarea
                             />
                           </div>
-                        ) : (
-                          <div className="grid md:grid-cols-2 gap-4">
-                            {q.options.map((opt, oi) => (
-                              <div key={oi} className={`flex items-start gap-3 p-3 rounded-2xl border-2 transition-all ${q.correctIndex === oi ? 'border-green-500 bg-green-50' : 'border-gray-50'}`}>
-                                <input type="radio" className="mt-4" checked={q.correctIndex === oi} onChange={() => { const newQs = [...draftMaterial.questions!]; newQs[i].correctIndex = oi; setDraftMaterial({...draftMaterial, questions: newQs}); }} />
-                                <div className="flex-1">
-                                   <ExpandableField 
-                                    value={opt} 
-                                    onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].options[oi] = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
-                                    placeholder={`אופציה ${oi+1}`} 
-                                  />
+                          {q.type === 'OPEN' ? (
+                            <div className="space-y-2">
+                              <ExpandableField 
+                                label="תשובת מודל"
+                                value={q.modelAnswer || ''} 
+                                onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].modelAnswer = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
+                                placeholder="תשובת מודל..." 
+                                isTextarea
+                              />
+                            </div>
+                          ) : (
+                            <div className={`grid gap-4 transition-all duration-300 ${anyOptionExpanded ? 'grid-cols-1' : 'md:grid-cols-2'}`}>
+                              {(q.options || []).map((opt, oi) => (
+                                <div key={oi} className={`flex items-start gap-3 p-3 rounded-2xl border-2 transition-all ${q.correctIndex === oi ? 'border-green-500 bg-green-50' : 'border-gray-50'} ${expandedOptionMap[`${q.id}-${oi}`] ? 'col-span-full' : ''}`}>
+                                  <input type="radio" className="mt-4" checked={q.correctIndex === oi} onChange={() => { const newQs = [...draftMaterial.questions!]; newQs[i].correctIndex = oi; setDraftMaterial({...draftMaterial, questions: newQs}); }} />
+                                  <div className="flex-1">
+                                     <ExpandableField 
+                                      value={opt} 
+                                      onToggle={(expanded) => setExpandedOptionMap(prev => ({...prev, [`${q.id}-${oi}`]: expanded}))}
+                                      onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].options[oi] = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
+                                      placeholder={`אופציה ${oi+1}`} 
+                                    />
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
@@ -1284,7 +1305,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                     {chatAttachment && (
                         <div className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-gray-200 shadow-inner w-fit animate-fade-in">
                             {chatAttachment.preview ? (
-                                <img src={chatAttachment.preview} className="w-12 h-12 object-cover rounded-xl" />
+                                <img src={chatAttachment.preview} className="w-12 h-12 object-cover rounded-xl" alt="Preview" />
                             ) : (
                                 <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-xl flex items-center justify-center"><FileText size={24}/></div>
                             )}
