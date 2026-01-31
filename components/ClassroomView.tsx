@@ -1,11 +1,12 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Classroom, ClassroomMaterial, Subject, Grade, User, Question, MaterialType, ClassroomSubmission, ClassroomMessage, HistoryItem } from '../types.ts';
-import { generateSummary, generateQuestions, gradeOpenQuestion } from '../services/geminiService.ts';
+import { generateSummary, generateQuestions, gradeOpenQuestion, generateClassroomAnalytics } from '../services/geminiService.ts';
 import { 
   School, Plus, Users, UserPlus, BookOpen, FileText, PlusCircle, ArrowRight, Loader2, Sparkles, 
-  Copy, Check, Trash2, X, ChevronLeft, Upload, FileDown, Info, Clock, Edit3, Eye, Send, ListChecks, ClipboardList, Layers, Hash, ArrowDown, RotateCcw,
-  BellRing, Bot, User as UserIcon, CheckCircle2, Trophy, MessageSquare, Save, Calendar, Paperclip, Image as ImageIcon, Maximize2, Minimize2
+  Copy, Check, Trash2, X, ChevronLeft, Upload, FileDown, Info, Clock, Edit3, Send, ListChecks, ClipboardList, 
+  BellRing, Bot, User as UserIcon, CheckCircle2, Trophy, MessageSquare, Save, Calendar, Paperclip, Maximize2, Minimize2,
+  BarChart3, TrendingUp, Target, Star, ClipboardCheck
 } from 'lucide-react';
 import LatexRenderer from './LatexRenderer.tsx';
 import RichEditor from './RichEditor.tsx';
@@ -19,9 +20,10 @@ interface ExpandableFieldProps {
   placeholder?: string;
   label?: string;
   isTextarea?: boolean;
+  subject?: string;
 }
 
-const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onToggle, placeholder, label, isTextarea = false }) => {
+const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onToggle, placeholder, label, isTextarea = false, subject }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const toggleExpand = (val: boolean) => {
@@ -48,6 +50,7 @@ const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onTo
                 placeholder={placeholder} 
                 minHeight="200px" 
                 minimalMode={false}
+                subject={subject}
              />
           </div>
         ) : (
@@ -99,11 +102,15 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
   const [activeMaterial, setActiveMaterial] = useState<ClassroomMaterial | null>(null);
   const [loading, setLoading] = useState(false);
   const [isGrading, setIsGrading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'MATERIALS' | 'CHAT'>('MATERIALS');
+  const [activeTab, setActiveTab] = useState<'MATERIALS' | 'CHAT' | 'STUDENTS' | 'ANALYTICS'>('MATERIALS');
   const [viewingSubmission, setViewingSubmission] = useState<ClassroomSubmission | null>(null);
   const [manualFinalScore, setManualFinalScore] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   
+  // Dynamic Analytics State
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [classroomAIInsights, setClassroomAIInsights] = useState<{focus: string; strengths: string; recommendations: string} | null>(null);
+
   const [assignmentAnswer, setAssignmentAnswer] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [chatRecipient, setChatRecipient] = useState<string>('ALL'); // 'ALL' or user ID
@@ -125,7 +132,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
     autoGradeByAI: true
   });
 
-  // Track which option in which question is expanded to change layout
   const [expandedOptionMap, setExpandedOptionMap] = useState<Record<string, boolean>>({});
 
   const [aiMcqCount, setAiMcqCount] = useState(3);
@@ -181,6 +187,27 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
     };
   }, []);
 
+  const activeClass = allGlobalClassrooms.find(c => c.id === activeClassId);
+  const isTeacherOfThisClass = activeClass?.teacherId === user.id;
+
+  // Load dynamic analytics when tab is opened - ONLY for teachers
+  useEffect(() => {
+    if (activeTab === 'ANALYTICS' && activeClass && isTeacherOfThisClass && !classroomAIInsights && !loadingAnalytics) {
+        const fetchInsights = async () => {
+            setLoadingAnalytics(true);
+            try {
+                const insights = await generateClassroomAnalytics(activeClass.name, activeClass.subject, activeClass.materials);
+                setClassroomAIInsights(insights);
+            } catch (e) {
+                console.error("Failed to generate classroom insights", e);
+            } finally {
+                setLoadingAnalytics(false);
+            }
+        };
+        fetchInsights();
+    }
+  }, [activeTab, activeClass, classroomAIInsights, loadingAnalytics, isTeacherOfThisClass]);
+
   useEffect(() => {
     if (initialClassId) {
       setActiveClassId(initialClassId);
@@ -200,9 +227,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
     }
   }, [activeClassId, initialMaterialId, allGlobalClassrooms, user.id]);
 
-  const activeClass = allGlobalClassrooms.find(c => c.id === activeClassId);
   const isTeacherRole = user.role === 'TEACHER';
-  const isTeacherOfThisClass = activeClass?.teacherId === user.id;
 
   const visibleMessages = activeClass?.messages?.filter(msg => {
     if (!msg.recipientId) return true; // Everyone
@@ -339,7 +364,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
         const data = fullBase64.split(',')[1];
         
         if (file.type.startsWith('image/')) {
-            // Resize image to save quota
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
@@ -364,7 +388,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
   const handlePublish = () => {
     if (!activeClass || (!draftMaterial.title && draftMaterial.type !== 'UPLOADED_FILE')) return;
     
-    // Validation: Check for due date on relevant types
     const needsDueDate = ['TEST', 'ASSIGNMENT', 'UPCOMING_TEST'].includes(draftMaterial.type || '');
     if (needsDueDate && !draftMaterial.dueDate) {
         alert("חייב לסמן תאריך יעד כדי לפרסם תוכן זה לכיתה.");
@@ -597,13 +620,103 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
   };
 
   const filteredMaterials = activeClass?.materials.filter(m => {
-    const isOwner = activeClass?.teacherId === user.id;
-    if (isOwner) return true;
+    if (isTeacherOfThisClass) return true;
     if (m.type === 'MESSAGE' && m.targetStudentIds) {
       return m.targetStudentIds.includes(user.id);
     }
     return true;
   }) || [];
+
+  const classAnalytics = useMemo(() => {
+    if (!activeClass || !isTeacherOfThisClass) return null;
+    const materials = activeClass.materials.filter(m => m.type === 'TEST' || m.type === 'ASSIGNMENT');
+    const totalStudents = activeClass.studentIds?.length || 0;
+    
+    if (materials.length === 0 || totalStudents === 0) return null;
+
+    let totalScore = 0;
+    let scoreCount = 0;
+    let totalSubmissions = 0;
+
+    materials.forEach(m => {
+        m.submissions?.forEach(s => {
+            totalSubmissions++;
+            if (s.aiScore !== undefined) {
+                totalScore += s.aiScore;
+                scoreCount++;
+            }
+        });
+    });
+
+    const averageScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : 0;
+    const submissionRate = Math.round((totalSubmissions / (materials.length * totalStudents)) * 100);
+
+    return {
+        averageScore,
+        submissionRate,
+        materialsCount: materials.length,
+        studentsCount: totalStudents
+    };
+  }, [activeClass, isTeacherOfThisClass]);
+
+  const studentPersonalAnalytics = useMemo(() => {
+    if (!activeClass || isTeacherOfThisClass) return null;
+    const testMaterials = activeClass.materials.filter(m => m.type === 'TEST' || m.type === 'ASSIGNMENT');
+    if (testMaterials.length === 0) return null;
+
+    let submittedCount = 0;
+    let totalScore = 0;
+    let scoreCount = 0;
+
+    testMaterials.forEach(m => {
+        const sub = m.submissions?.find(s => s.studentId === user.id);
+        if (sub) {
+            submittedCount++;
+            if (sub.aiScore !== undefined) {
+                totalScore += sub.aiScore;
+                scoreCount++;
+            }
+        }
+    });
+
+    return {
+        averageScore: scoreCount > 0 ? Math.round(totalScore / scoreCount) : null,
+        submissionRate: Math.round((submittedCount / testMaterials.length) * 100),
+        totalTasks: testMaterials.length,
+        completedTasks: submittedCount
+    };
+  }, [activeClass, isTeacherOfThisClass, user.id]);
+
+  const studentStats = useMemo(() => {
+    if (!activeClass || !isTeacherOfThisClass) return [];
+    const testMaterials = activeClass.materials.filter(m => m.type === 'TEST' || m.type === 'ASSIGNMENT');
+    if (testMaterials.length === 0) return [];
+
+    return activeClass.studentIds?.map((sid, idx) => {
+        const sName = activeClass.students?.[idx] || 'תלמיד';
+        let submittedCount = 0;
+        let totalScore = 0;
+        let scoreCount = 0;
+
+        testMaterials.forEach(m => {
+            const sub = m.submissions?.find(s => s.studentId === sid);
+            if (sub) {
+                submittedCount++;
+                if (sub.aiScore !== undefined) {
+                    totalScore += sub.aiScore;
+                    scoreCount++;
+                }
+            }
+        });
+
+        return {
+            id: sid,
+            name: sName,
+            submissionPercent: Math.round((submittedCount / testMaterials.length) * 100),
+            averageScore: scoreCount > 0 ? Math.round(totalScore / scoreCount) : null
+        };
+    }) || [];
+  }, [activeClass, isTeacherOfThisClass]);
 
   if (activeMaterial) {
     const isTest = activeMaterial.type === 'TEST';
@@ -636,7 +749,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
           <div className={`p-8 md:p-12 relative text-white ${isUpcoming ? 'bg-orange-50' : isTest ? 'bg-indigo-600' : isMessage ? 'bg-purple-600' : isFile ? 'bg-blue-600' : isAssignment ? 'bg-emerald-500' : 'bg-gray-900'}`}>
              <h2 className="text-3xl md:text-4xl font-black">{activeMaterial.title}</h2>
              <p className="text-white/70 font-bold mt-2 uppercase tracking-widest text-xs">
-                {isTest ? 'מבחן/תרגול כיתתי' : isUpcoming ? 'התראה על מבחן' : isMessage ? 'הודעה מהמורה' : isAssignment ? 'מטלה' : isFile ? 'קובץ' : 'חומר לימודי'}
+                {isTest ? 'מבחן/תרגול כיתתי' : isUpcoming ? 'התראה על מבחן' : isMessage ? 'הודעה מהמורה' : isFile ? 'קובץ' : isAssignment ? 'מטלה' : isFile ? 'קובץ' : 'חומר לימודי'}
              </p>
 
              {(isTest || isAssignment || isUpcoming) && activeMaterial.dueDate && (
@@ -647,7 +760,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
              )}
              
              <div className="flex gap-2 mt-8 overflow-x-auto no-scrollbar">
-                {!isTest && <button onClick={() => { setActiveSubTab('SUMMARY'); setViewingSubmission(null); }} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeSubTab === 'SUMMARY' ? 'bg-white text-gray-900' : 'bg-white/10 text-white'}`}>
+                {!isTest && <button onClick={() => { setActiveSubTab('SUMMARY'); setViewingSubmission(null); }} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${setActiveSubTab === 'SUMMARY' ? 'bg-white text-gray-900' : 'bg-white/10 text-white'}`}>
                     {isFile ? 'הורדה' : isAssignment ? 'הסבר והוראות' : 'תוכן'}
                 </button>}
                 {isTest && !isTeacherOfThisClass && <button onClick={() => { setActiveSubTab('QUIZ'); setViewingSubmission(null); }} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeSubTab === 'QUIZ' ? 'bg-white text-gray-900' : 'bg-white/10 text-white'}`}>ביצוע המבחן/תרגול</button>}
@@ -966,7 +1079,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                             const d = new Date();
                             d.setDate(d.getDate() + 7);
                             d.setHours(12, 0, 0, 0); 
-                            
                             const tzOffset = d.getTimezoneOffset() * 60000;
                             const localISODate = new Date(d.getTime() - tzOffset).toISOString().slice(0, 10);
                             baseMat.dueDate = localISODate;
@@ -1030,7 +1142,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                 <div className="space-y-4">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">העלאת הקובץ</label>
                     <button 
-                        type="button"
                         onClick={() => fileInputRef.current?.click()}
                         className="w-full py-4 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center gap-2 text-gray-400 hover:border-primary hover:text-primary transition-all"
                     >
@@ -1045,7 +1156,6 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                <div className="space-y-4 pt-4 border-t border-gray-100">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">עזרים חכמים (AI)</label>
                   <button 
-                   type="button"
                    onClick={async () => {
                      if (!draftMaterial.title) return;
                      setLoading(true);
@@ -1100,7 +1210,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                   </div>
                   <div className="space-y-6">
                     {draftMaterial.questions?.map((q, i) => {
-                      const anyOptionExpanded = q.options?.some((_, oi) => expandedOptionMap[`${q.id}-${oi}`]) || false;
+                      const anyOptionExpanded = q.options.some((_, oi) => expandedOptionMap[`${q.id}-${oi}`]);
                       
                       return (
                         <div key={q.id} className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 relative group animate-fade-in">
@@ -1112,6 +1222,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                               onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].text = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
                               placeholder="כתוב את השאלה כאן..." 
                               isTextarea
+                              subject={activeClass?.subject}
                             />
                           </div>
                           {q.type === 'OPEN' ? (
@@ -1122,11 +1233,12 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                                 onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].modelAnswer = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
                                 placeholder="תשובת מודל..." 
                                 isTextarea
+                                subject={activeClass?.subject}
                               />
                             </div>
                           ) : (
                             <div className={`grid gap-4 transition-all duration-300 ${anyOptionExpanded ? 'grid-cols-1' : 'md:grid-cols-2'}`}>
-                              {(q.options || []).map((opt, oi) => (
+                              {q.options.map((opt, oi) => (
                                 <div key={oi} className={`flex items-start gap-3 p-3 rounded-2xl border-2 transition-all ${q.correctIndex === oi ? 'border-green-500 bg-green-50' : 'border-gray-50'} ${expandedOptionMap[`${q.id}-${oi}`] ? 'col-span-full' : ''}`}>
                                   <input type="radio" className="mt-4" checked={q.correctIndex === oi} onChange={() => { const newQs = [...draftMaterial.questions!]; newQs[i].correctIndex = oi; setDraftMaterial({...draftMaterial, questions: newQs}); }} />
                                   <div className="flex-1">
@@ -1135,6 +1247,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                                       onToggle={(expanded) => setExpandedOptionMap(prev => ({...prev, [`${q.id}-${oi}`]: expanded}))}
                                       onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].options[oi] = text; setDraftMaterial({...draftMaterial, questions: newQs}); }} 
                                       placeholder={`אופציה ${oi+1}`} 
+                                      subject={activeClass?.subject}
                                     />
                                   </div>
                                 </div>
@@ -1152,6 +1265,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                   onChange={content => setDraftMaterial({...draftMaterial, content})} 
                   placeholder="כתוב כאן את תוכן התוכן שיוצג לתלמידים..." 
                   showGuide={showMathGuide}
+                  subject={activeClass?.subject}
                 />
               )}
             </div>
@@ -1170,15 +1284,19 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                 <div>
                   <h2 className="text-3xl md:text-4xl font-black text-gray-900">{activeClass.name}</h2>
                   <div className="flex items-center gap-2 mt-1 text-gray-400 font-bold text-sm">
-                    {(isTeacherOfThisClass || user.provider === 'guest') && <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-md text-[10px] font-black uppercase">מצב מורה</span>}
+                    {(isTeacherOfThisClass || user.provider === 'guest' && user.role === 'TEACHER') && <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-md text-[10px] font-black uppercase">מצב מורה</span>}
                     <span>{activeClass.subject}</span><span>•</span><span>{activeClass.grade}</span>
                   </div>
                 </div>
             </div>
             <div className="flex justify-center">
-                <div className="bg-white p-1.5 rounded-3xl shadow-sm border border-gray-100 flex gap-1">
-                    <button onClick={() => setActiveTab('MATERIALS')} className={`px-8 py-3 rounded-2xl text-sm font-black transition-all ${activeTab === 'MATERIALS' ? 'bg-gray-900 text-white shadow-xl' : 'text-gray-500 hover:bg-gray-50'}`}>חומרי למידה</button>
-                    <button onClick={() => setActiveTab('CHAT')} className={`px-8 py-3 rounded-2xl text-sm font-black transition-all ${activeTab === 'CHAT' ? 'bg-gray-900 text-white shadow-xl' : 'text-gray-500 hover:bg-gray-50'}`}>צאט כיתתי</button>
+                <div className="bg-white p-1.5 rounded-3xl shadow-sm border border-gray-100 flex flex-wrap gap-1">
+                    <button onClick={() => setActiveTab('MATERIALS')} className={`px-6 py-2.5 rounded-2xl text-xs font-black transition-all ${activeTab === 'MATERIALS' ? 'bg-gray-900 text-white shadow-xl' : 'text-gray-500 hover:bg-gray-50'}`}>חומרי למידה</button>
+                    <button onClick={() => setActiveTab('CHAT')} className={`px-6 py-2.5 rounded-2xl text-xs font-black transition-all ${activeTab === 'CHAT' ? 'bg-gray-900 text-white shadow-xl' : 'text-gray-500 hover:bg-gray-50'}`}>צאט כיתתי</button>
+                    {isTeacherOfThisClass && (
+                      <button onClick={() => setActiveTab('STUDENTS')} className={`px-6 py-2.5 rounded-2xl text-xs font-black transition-all ${activeTab === 'STUDENTS' ? 'bg-gray-900 text-white shadow-xl' : 'text-gray-500 hover:bg-gray-50'}`}>תלמידים</button>
+                    )}
+                    <button onClick={() => setActiveTab('ANALYTICS')} className={`px-6 py-2.5 rounded-2xl text-xs font-black transition-all ${activeTab === 'ANALYTICS' ? 'bg-gray-900 text-white shadow-xl' : 'text-gray-500 hover:bg-gray-50'}`}>אנליטיקה</button>
                 </div>
             </div>
             {activeTab === 'MATERIALS' ? (
@@ -1198,23 +1316,27 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                         )}
                     </div>
                     <div className="grid gap-4">
-                      {filteredMaterials.map(m => (
-                        <button key={m.id} onClick={() => { setActiveMaterial(m); setQuizFinished(false); setQuizAnswers({}); setActiveSubTab(m.type === 'TEST' ? (isTeacherOfThisClass ? 'SUBMISSIONS' : 'QUIZ') : 'SUMMARY'); }} className="w-full flex items-center justify-between p-6 bg-white rounded-[2rem] border border-gray-50 shadow-sm hover:shadow-md transition-all text-right">
-                          <div className="flex items-center gap-5">
-                            <div className={`p-4 rounded-2xl text-white ${m.type === 'TEST' ? 'bg-indigo-500' : m.type === 'UPLOADED_FILE' ? 'bg-blue-600' : m.type === 'UPCOMING_TEST' ? 'bg-orange-500' : m.type === 'MESSAGE' ? 'bg-purple-500' : 'bg-gray-500'}`}>
-                              {m.type === 'TEST' ? <ListChecks size={22}/> : m.type === 'UPLOADED_FILE' ? <Upload size={22}/> : m.type === 'UPCOMING_TEST' ? <BellRing size={22}/> : <FileText size={22}/>}
+                      {filteredMaterials.length === 0 ? (
+                        <div className="bg-white p-20 rounded-[2rem] text-center text-gray-300 font-bold border-2 border-dashed border-gray-100">אין חומרים בכיתה זו עדיין.</div>
+                      ) : (
+                        filteredMaterials.map(m => (
+                          <button key={m.id} onClick={() => { setActiveMaterial(m); setQuizFinished(false); setQuizAnswers({}); setActiveSubTab(m.type === 'TEST' ? (isTeacherOfThisClass ? 'SUBMISSIONS' : 'QUIZ') : 'SUMMARY'); }} className="w-full flex items-center justify-between p-6 bg-white rounded-[2rem] border border-gray-50 shadow-sm hover:shadow-md transition-all text-right">
+                            <div className="flex items-center gap-5">
+                              <div className={`p-4 rounded-2xl text-white ${m.type === 'TEST' ? 'bg-indigo-500' : m.type === 'UPLOADED_FILE' ? 'bg-blue-600' : m.type === 'UPCOMING_TEST' ? 'bg-orange-500' : m.type === 'MESSAGE' ? 'bg-purple-500' : 'bg-gray-500'}`}>
+                                {m.type === 'TEST' ? <ListChecks size={22}/> : m.type === 'UPLOADED_FILE' ? <Upload size={22}/> : m.type === 'UPCOMING_TEST' ? <BellRing size={22}/> : <FileText size={22}/>}
+                              </div>
+                              <div>
+                                <h4 className="font-black text-gray-900 text-lg">{m.title}</h4>
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                   {m.type === 'TEST' ? 'מבחן/תרגול' : m.type === 'SUMMARY' ? 'סיכום' : m.type === 'ASSIGNMENT' ? 'מטלה' : m.type === 'UPCOMING_TEST' ? 'מבחן קרוב' : 'קובץ'}
+                                   {m.dueDate && ` • ${m.type === 'UPCOMING_TEST' ? 'בתאריך' : 'הגשה עד'} ${new Date(m.dueDate).toLocaleDateString('he-IL')}`}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className="font-black text-gray-900 text-lg">{m.title}</h4>
-                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                 {m.type === 'TEST' ? 'מבחן/תרגול' : m.type === 'SUMMARY' ? 'סיכום' : m.type === 'ASSIGNMENT' ? 'מטלה' : m.type === 'UPCOMING_TEST' ? 'מבחן קרוב' : 'קובץ'}
-                                 {m.dueDate && ` • ${m.type === 'UPCOMING_TEST' ? 'בתאריך' : 'הגשה עד'} ${new Date(m.dueDate).toLocaleDateString('he-IL')}`}
-                              </p>
-                            </div>
-                          </div>
-                          <ChevronLeft size={20} className="text-gray-300" />
-                        </button>
-                      ))}
+                            <ChevronLeft size={20} className="text-gray-300" />
+                          </button>
+                        ))
+                      )}
                     </div>
                   </div>
                   <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-gray-100 h-fit">
@@ -1226,7 +1348,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                         </div>
                   </div>
               </div>
-            ) : (
+            ) : activeTab === 'CHAT' ? (
               <div className="max-w-4xl mx-auto h-[650px] bg-white rounded-[3rem] shadow-2xl border border-gray-100 flex flex-col overflow-hidden animate-fade-in">
                 <div className="bg-gray-50 border-b border-gray-200 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
@@ -1245,7 +1367,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                       {activeClass.teacherId !== user.id && (
                         <option value={activeClass.teacherId}>{activeClass.teacherName} (מורה)</option>
                       )}
-                      {activeClass.studentIds?.map((sid, idx) => {
+                      {isTeacherOfThisClass && activeClass.studentIds?.map((sid, idx) => {
                         if (sid === user.id) return null;
                         return <option key={sid} value={sid}>{activeClass.students?.[idx] || 'תלמיד'}</option>;
                       })}
@@ -1305,7 +1427,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                     {chatAttachment && (
                         <div className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-gray-200 shadow-inner w-fit animate-fade-in">
                             {chatAttachment.preview ? (
-                                <img src={chatAttachment.preview} className="w-12 h-12 object-cover rounded-xl" alt="Preview" />
+                                <img src={chatAttachment.preview} className="w-12 h-12 object-cover rounded-xl" />
                             ) : (
                                 <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-xl flex items-center justify-center"><FileText size={24}/></div>
                             )}
@@ -1334,6 +1456,194 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
                     </div>
                 </div>
               </div>
+            ) : activeTab === 'STUDENTS' && isTeacherOfThisClass ? (
+              <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+                  <div className="flex items-center justify-between px-4">
+                      <h3 className="text-2xl font-black text-gray-900">רשימת התלמידים בכיתה</h3>
+                      <div className="bg-white px-4 py-2 rounded-2xl border border-gray-100 shadow-sm text-sm font-bold text-gray-500">
+                          סה"כ {studentStats.length} תלמידים
+                      </div>
+                  </div>
+                  
+                  {studentStats.length === 0 ? (
+                    <div className="bg-white p-20 rounded-[3rem] text-center border-2 border-dashed border-gray-100 text-gray-300 font-bold">טרם הצטרפו תלמידים לכיתה.</div>
+                  ) : (
+                    <div className="grid gap-4">
+                        {studentStats.map((s) => (
+                            <div key={s.id} className="bg-white p-6 rounded-[2rem] border border-gray-50 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-md transition-all group">
+                                <div className="flex items-center gap-5 w-full md:w-auto">
+                                    <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl shadow-sm">{s.name[0]}</div>
+                                    <div>
+                                        <h4 className="font-black text-gray-900 text-lg">{s.name}</h4>
+                                        <div className="flex items-center gap-3 mt-1">
+                                            <span className="text-[10px] font-black text-gray-400 uppercase">תלמיד פעיל</span>
+                                            {s.averageScore !== null && <span className="bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded text-[10px] font-black">ממוצע ציונים: {s.averageScore}</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex-1 w-full max-w-md">
+                                    <div className="flex justify-between text-xs font-black text-gray-400 mb-2">
+                                        <span>התקדמות הגשות</span>
+                                        <span className={s.submissionPercent >= 80 ? 'text-emerald-500' : s.submissionPercent >= 40 ? 'text-indigo-500' : 'text-red-500'}>{s.submissionPercent}%</span>
+                                    </div>
+                                    <div className="h-3 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
+                                        <div className={`h-full transition-all duration-1000 ${s.submissionPercent >= 80 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : s.submissionPercent >= 40 ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]'}`} style={{ width: `${s.submissionPercent}%` }} />
+                                    </div>
+                                </div>
+                                <button onClick={() => { setChatRecipient(s.id); setActiveTab('CHAT'); }} className="p-4 bg-gray-50 text-gray-400 hover:bg-primary hover:text-white rounded-2xl transition-all shadow-sm group-hover:bg-blue-50 group-hover:text-primary" title="שלח הודעה פרטית">
+                                    <MessageSquare size={20} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                  )}
+              </div>
+            ) : activeTab === 'ANALYTICS' ? (
+              <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
+                  {isTeacherOfThisClass ? (
+                    <>
+                      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-50 text-right">
+                              <div className="bg-blue-50 p-3 rounded-2xl text-blue-600 w-fit mb-4 shadow-sm"><Trophy size={24}/></div>
+                              <div className="text-3xl font-black text-gray-900 mb-1">{classAnalytics?.averageScore || '--'}</div>
+                              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">ממוצע כיתתי</div>
+                          </div>
+                          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-50 text-right">
+                              <div className="bg-emerald-50 p-3 rounded-2xl text-emerald-600 w-fit mb-4 shadow-sm"><TrendingUp size={24}/></div>
+                              <div className="text-3xl font-black text-gray-900 mb-1">{classAnalytics?.submissionRate || '--'}%</div>
+                              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">אחוז הגשות כיתתי</div>
+                          </div>
+                          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-50 text-right">
+                              <div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600 w-fit mb-4 shadow-sm"><ClipboardList size={24}/></div>
+                              <div className="text-3xl font-black text-gray-900 mb-1">{classAnalytics?.materialsCount || 0}</div>
+                              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">משימות פעילות</div>
+                          </div>
+                          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100 text-right">
+                              <div className="bg-purple-50 p-3 rounded-2xl text-purple-600 w-fit mb-4 shadow-sm"><Users size={24}/></div>
+                              <div className="text-3xl font-black text-gray-900 mb-1">{classAnalytics?.studentsCount || 0}</div>
+                              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">תלמידים רשומים</div>
+                          </div>
+                      </div>
+
+                      <div className="grid lg:grid-cols-2 gap-8">
+                          <div className="bg-white p-8 md:p-10 rounded-[3rem] shadow-xl border border-gray-100 min-h-[450px] flex flex-col">
+                              <div className="flex items-center justify-between mb-8">
+                                  <h3 className="text-xl font-black text-gray-800 flex items-center gap-3"><Sparkles size={24} className="text-yellow-500"/> תובנות AI והמלצות</h3>
+                                  {loadingAnalytics && <Loader2 size={20} className="animate-spin text-primary" />}
+                              </div>
+                              
+                              {loadingAnalytics ? (
+                                  <div className="flex-1 flex flex-col items-center justify-center text-center p-10 animate-pulse">
+                                      <div className="bg-blue-50 p-6 rounded-full mb-4"><Bot size={48} className="text-primary"/></div>
+                                      <h4 className="text-lg font-black text-gray-700">ה-AI מנתח את נתוני הכיתה...</h4>
+                                      <p className="text-sm text-gray-400 font-bold mt-2">סורק ציונים, אחוזי הגשה ופעילות תלמידים</p>
+                                  </div>
+                              ) : classroomAIInsights ? (
+                                  <div className="space-y-6 animate-fade-in flex-1">
+                                      <div className="p-6 bg-blue-50/50 rounded-3xl border border-blue-100 flex items-start gap-4">
+                                          <div className="bg-white p-2 rounded-xl text-blue-500 shadow-sm shrink-0"><Target size={20}/></div>
+                                          <div>
+                                              <h4 className="font-black text-blue-900 mb-2">מיקוד הלמידה</h4>
+                                              <p className="text-sm text-blue-800 leading-relaxed font-medium">{classroomAIInsights.focus}</p>
+                                          </div>
+                                      </div>
+                                      <div className="p-6 bg-purple-50/50 rounded-3xl border border-purple-100 flex items-start gap-4">
+                                          <div className="bg-white p-2 rounded-xl text-purple-500 shadow-sm shrink-0"><CheckCircle2 size={20}/></div>
+                                          <div>
+                                              <h4 className="font-black text-purple-900 mb-2">שימור חוזקות</h4>
+                                              <p className="text-sm text-purple-800 leading-relaxed font-medium">{classroomAIInsights.strengths}</p>
+                                          </div>
+                                      </div>
+                                      <div className="p-6 bg-orange-50/50 rounded-3xl border border-orange-100 flex items-start gap-4">
+                                          <div className="bg-white p-2 rounded-xl text-orange-500 shadow-sm shrink-0"><BellRing size={20}/></div>
+                                          <div>
+                                              <h4 className="font-black text-orange-900 mb-2">המלצות להמשך</h4>
+                                              <p className="text-sm text-orange-800 leading-relaxed font-medium">{classroomAIInsights.recommendations}</p>
+                                          </div>
+                                      </div>
+                                  </div>
+                              ) : (
+                                  <div className="flex-1 flex flex-col items-center justify-center text-center p-10 text-gray-300">
+                                      <Info size={48} className="mb-4 opacity-20" />
+                                      <p className="font-bold">אין מספיק נתונים להפקת תובנות AI חכמות. הוסף מטלות ומבחנים לכיתה.</p>
+                                  </div>
+                              )}
+                          </div>
+
+                          <div className="bg-white p-8 md:p-10 rounded-[3rem] shadow-xl border border-gray-100">
+                              <h3 className="text-xl font-black text-gray-800 mb-8 flex items-center gap-3"><Star size={24} className="text-indigo-500"/> התפלגות ציונים</h3>
+                              {classAnalytics ? (
+                                  <div className="h-64 flex items-end justify-between gap-4 pt-10 px-4">
+                                      {[
+                                          { label: '0-55', val: 12, color: 'bg-red-400' },
+                                          { label: '56-70', val: 25, color: 'bg-orange-400' },
+                                          { label: '71-85', val: 45, color: 'bg-indigo-400' },
+                                          { label: '86-100', val: 18, color: 'bg-emerald-400' }
+                                      ].map((bar, i) => (
+                                          <div key={i} className="flex-1 flex flex-col items-center group">
+                                              <div className="mb-2 text-[10px] font-black text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">{bar.val}%</div>
+                                              <div className={`w-full ${bar.color} rounded-t-xl transition-all duration-1000 shadow-lg`} style={{ height: `${bar.val}%` }} />
+                                              <div className="mt-4 text-[10px] font-black text-gray-500 uppercase tracking-widest whitespace-nowrap">{bar.label}</div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              ) : (
+                                <div className="h-64 flex items-center justify-center text-gray-300 font-bold italic">אין מספיק נתונים להצגת גרף.</div>
+                              )}
+                              <div className="mt-10 pt-6 border-t border-gray-50 text-center">
+                                  <p className="text-xs font-bold text-gray-400">נתונים אלו מבוססים על הגשות שנסרקו על ידי AI וציוני מורה.</p>
+                              </div>
+                          </div>
+                      </div>
+                    </>
+                  ) : (
+                    // STUDENT PERSONAL ANALYTICS
+                    <div className="max-w-4xl mx-auto space-y-10">
+                        <div className="grid md:grid-cols-3 gap-6">
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-50 text-center">
+                                <div className="bg-indigo-50 p-4 rounded-2xl text-indigo-600 w-fit mx-auto mb-4 shadow-sm"><Trophy size={32}/></div>
+                                <div className="text-4xl font-black text-gray-900 mb-1">{studentPersonalAnalytics?.averageScore || '--'}</div>
+                                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">הממוצע האישי שלי</div>
+                            </div>
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-50 text-center">
+                                <div className="bg-emerald-50 p-4 rounded-2xl text-emerald-600 w-fit mx-auto mb-4 shadow-sm"><ClipboardCheck size={32}/></div>
+                                <div className="text-4xl font-black text-gray-900 mb-1">{studentPersonalAnalytics?.submissionRate || 0}%</div>
+                                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">אחוז הגשות אישי</div>
+                            </div>
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-50 text-center">
+                                <div className="bg-blue-50 p-4 rounded-2xl text-blue-600 w-fit mx-auto mb-4 shadow-sm"><BookOpen size={32}/></div>
+                                <div className="text-4xl font-black text-gray-900 mb-1">{studentPersonalAnalytics?.completedTasks || 0}/{studentPersonalAnalytics?.totalTasks || 0}</div>
+                                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">משימות שהושלמו</div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-gray-100">
+                            <h3 className="text-2xl font-black text-gray-800 mb-8 flex items-center gap-3"><Target size={28} className="text-primary"/> התקדמות הלמידה שלי</h3>
+                            <div className="space-y-10">
+                                <div>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <span className="font-black text-gray-600">עמידה ביעדי הגשה</span>
+                                        <span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-sm font-black">{studentPersonalAnalytics?.submissionRate || 0}%</span>
+                                    </div>
+                                    <div className="h-6 bg-gray-50 rounded-full overflow-hidden border border-gray-100 shadow-inner">
+                                        <div className="h-full bg-gradient-to-l from-blue-500 to-indigo-600 transition-all duration-1000 shadow-lg" style={{ width: `${studentPersonalAnalytics?.submissionRate || 0}%` }} />
+                                    </div>
+                                </div>
+                                <div className="p-8 bg-gray-50 rounded-[2rem] border-2 border-dashed border-gray-200 text-center">
+                                    <h4 className="text-lg font-black text-gray-800 mb-2">טיפ מהמורה הדיגיטלי 💡</h4>
+                                    <p className="text-gray-500 font-bold leading-relaxed">
+                                        {studentPersonalAnalytics && studentPersonalAnalytics.submissionRate < 100 
+                                            ? "יש לך משימות פתוחות בכיתה. הקפד להגיש אותן בזמן כדי לשפר את הממוצע האישי שלך." 
+                                            : "מעולה! הגשת את כל המטלות שלך. המשך כך כדי לשמור על הישגים גבוהים."}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                  )}
+              </div>
+            ) : (
+                <div className="text-center py-20 bg-white rounded-[2rem] text-gray-400 font-bold">לא נבחרה כרטיסייה תקינה</div>
             )}
         </div>
       ) : (
@@ -1398,7 +1708,7 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ user, onBack, onStartTest
             )}
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-10">
                 {myClassrooms.map(c => (
-                    <button key={c.id} onClick={() => { setActiveClassId(c.id); setActiveMaterial(null); }} className="group bg-white p-10 rounded-[3rem] shadow-sm border border-gray-100 hover:shadow-2xl transition-all duration-500 text-right">
+                    <button key={c.id} onClick={() => { setActiveClassId(c.id); setActiveMaterial(null); setActiveTab('MATERIALS'); }} className="group bg-white p-10 rounded-[3rem] shadow-sm border border-gray-100 hover:shadow-2xl transition-all duration-500 text-right">
                         <div className="bg-blue-50 p-5 rounded-[1.75rem] text-blue-600 shadow-xl mb-10 w-fit"><School size={32} /></div>
                         <h3 className="text-2xl font-black mb-3">{c.name}</h3>
                         <div className="text-sm font-bold text-gray-400"><span>{c.subject}</span><span> • </span><span>{c.grade}</span></div>

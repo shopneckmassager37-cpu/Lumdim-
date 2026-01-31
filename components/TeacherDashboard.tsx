@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Classroom, Subject, Grade, User, LessonPlan, InfographicData, PresentationData, ExamCheckResult, HistoryItem } from '../types.ts';
 import { generateLessonPlan, generateLessonVisuals, checkExamWithRubric } from '../services/geminiService.ts';
+import LatexRenderer from './LatexRenderer.tsx';
 
 const DB_KEY = 'lumdim_global_database_v1';
 
@@ -731,29 +732,35 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onSelectClass
                       <section className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100">
                         <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-3"><Lightbulb className="text-yellow-500" /> פתיחה</h3>
                         <div className="text-lg leading-relaxed text-gray-700 italic border-r-4 border-yellow-100 pr-6 py-2">
-                          {generatedPlan.introduction}
+                          <LatexRenderer text={generatedPlan.introduction} />
                         </div>
                       </section>
                       <section>
                         <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-3"><BookOpen className="text-indigo-500" /> גוף השיעור</h3>
                         <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-gray-100 leading-relaxed text-gray-700 text-lg">
-                          {generatedPlan.mainContent}
+                          <LatexRenderer text={generatedPlan.mainContent} />
                         </div>
                       </section>
                       {generatedPlan.activity && (
                         <section className="bg-emerald-50/50 p-8 rounded-[2.5rem] border border-emerald-100">
                           <h3 className="text-xl font-black text-emerald-900 mb-6 flex items-center gap-3"><Users className="text-emerald-600" /> פעילות קבוצתית</h3>
-                          <p className="text-lg text-emerald-800 leading-relaxed font-medium">{generatedPlan.activity}</p>
+                          <div className="text-lg text-emerald-800 leading-relaxed font-medium">
+                            <LatexRenderer text={generatedPlan.activity} />
+                          </div>
                         </section>
                       )}
                       <section>
                         <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-3"><MessageSquare className="text-purple-500" /> שאלות לסיכום ודיון</h3>
-                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 text-gray-700 font-medium">{generatedPlan.summary}</div>
+                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 text-gray-700 font-medium">
+                          <LatexRenderer text={generatedPlan.summary} />
+                        </div>
                       </section>
                       {generatedPlan.homework && (
                         <section className="bg-orange-50/50 p-8 rounded-[2.5rem] border border-orange-100">
                            <h3 className="text-xl font-black text-orange-900 mb-6 flex items-center gap-3"><Home className="text-orange-600" /> שיעורי בית</h3>
-                           <p className="text-lg text-orange-800 leading-relaxed font-medium">{generatedPlan.homework}</p>
+                           <div className="text-lg text-orange-800 leading-relaxed font-medium">
+                             <LatexRenderer text={generatedPlan.homework} />
+                           </div>
                         </section>
                       )}
                     </div>

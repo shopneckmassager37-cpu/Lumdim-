@@ -1,12 +1,12 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Classroom, ClassroomMaterial, Subject, Grade, User, Question, MaterialType, HistoryItem } from '../types.ts';
 import { generateSummary, generateQuestions } from '../services/geminiService.ts';
 import { 
   X, Send, FileText, ListChecks, ClipboardList, Upload, BellRing, Bot, Sparkles, Loader2, 
-  Trash2, Plus, CheckCircle2, ChevronRight, School, Search, Calculator, Maximize2, Minimize2, FolderOpen, Shapes, Grid3X3, UserIcon, Users, GraduationCap, ChevronDown
+  Trash2, Plus, CheckCircle2, Search, School, Maximize2, Minimize2, FolderOpen
 } from 'lucide-react';
-import RichEditor, { RichEditorHandle } from './RichEditor.tsx';
+import RichEditor from './RichEditor.tsx';
 
 interface ExpandableFieldProps {
   value: string;
@@ -15,9 +15,10 @@ interface ExpandableFieldProps {
   placeholder?: string;
   label?: string;
   isTextarea?: boolean;
+  subject?: string;
 }
 
-const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onToggle, placeholder, label, isTextarea = false }) => {
+const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onToggle, placeholder, label, isTextarea = false, subject }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const toggleExpand = (val: boolean) => {
@@ -44,6 +45,7 @@ const ExpandableField: React.FC<ExpandableFieldProps> = ({ value, onChange, onTo
                 placeholder={placeholder} 
                 minHeight="200px" 
                 minimalMode={false}
+                subject={subject}
              />
           </div>
         ) : (
@@ -90,10 +92,9 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
   const [loading, setLoading] = useState(false);
   const [showClassSelector, setShowClassSelector] = useState(false);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
-  const [selectedGrade, setSelectedGrade] = useState<Grade>(Grade.GRADE_7);
   const [searchTerm, setSearchTerm] = useState('');
-  const editorRef = useRef<RichEditorHandle>(null);
 
+  // Track which option in which question is expanded to change layout
   const [expandedOptionMap, setExpandedOptionMap] = useState<Record<string, boolean>>({});
 
   const [draftMaterial, setDraftMaterial] = useState<Partial<ClassroomMaterial>>({
@@ -110,7 +111,18 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
     if (initialMaterial) {
       setDraftMaterial({
         ...initialMaterial,
-        id: Date.now().toString(),
+        id: Date.now().toString(), // Treat as new draft based on template
+      });
+    } else {
+      // RESET to defaults if creating new
+      setDraftMaterial({
+        type: 'SUMMARY',
+        title: '',
+        content: '',
+        questions: [],
+        dueDate: '',
+        teacherAttachments: [],
+        autoGradeByAI: true
       });
     }
   }, [initialMaterial]);
@@ -118,6 +130,15 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
   const [aiMcqCount, setAiMcqCount] = useState(3);
   const [aiOpenCount, setAiOpenCount] = useState(2);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // For global editor, we check the first selected class or the first available class
+  // Fix: Imported useMemo from react to resolve 'Cannot find name useMemo'
+  const currentContextSubject = useMemo(() => {
+    if (selectedClassIds.length > 0) {
+      return classrooms.find(c => c.id === selectedClassIds[0])?.subject;
+    }
+    return classrooms[0]?.subject;
+  }, [selectedClassIds, classrooms]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -137,6 +158,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
 
   const isFileOnly = draftMaterial.type === 'UPLOADED_FILE';
   const isTest = draftMaterial.type === 'TEST';
+  const isUpcoming = draftMaterial.type === 'UPCOMING_TEST';
   const isAssignment = draftMaterial.type === 'ASSIGNMENT';
 
   const createFinalMaterial = (): ClassroomMaterial => {
@@ -162,7 +184,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
       return;
     }
     
-    const needsDueDate = ['TEST', 'ASSIGNMENT'].includes(draftMaterial.type || '');
+    const needsDueDate = ['TEST', 'ASSIGNMENT', 'UPCOMING_TEST'].includes(draftMaterial.type || '');
     if (needsDueDate && !draftMaterial.dueDate) {
         alert("חייב לסמן תאריך יעד כדי לפרסם תוכן זה לכיתה.");
         return;
@@ -203,13 +225,12 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
           className="bg-primary text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-600 disabled:opacity-30 transition-all flex items-center gap-2"
         >
           <Send size={18} />
-          פרסם לכיתות
+          בחר כיתות לפרסום
         </button>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto p-6 space-y-8 no-scrollbar">
-          
           <div className="space-y-4">
             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">סוג התוכן</label>
             <div className="grid gap-2">
@@ -217,13 +238,14 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                 { id: 'SUMMARY', label: 'סיכום לימודי', icon: FileText, color: 'blue' },
                 { id: 'TEST', label: 'מבחן/תרגול', icon: ListChecks, color: 'indigo' },
                 { id: 'ASSIGNMENT', label: 'מטלה להגשה', icon: ClipboardList, color: 'emerald' },
+                { id: 'UPCOMING_TEST', label: 'התראה על מבחן', icon: BellRing, color: 'orange' },
                 { id: 'UPLOADED_FILE', label: 'קובץ', icon: Upload, color: 'blue' }
               ].map(t => (
                 <button 
                   key={t.id}
                   onClick={() => {
                     const newType = t.id as MaterialType;
-                    const needsDate = ['TEST', 'ASSIGNMENT'].includes(newType);
+                    const needsDate = ['TEST', 'ASSIGNMENT', 'UPCOMING_TEST'].includes(newType);
                     let newDueDate = draftMaterial.dueDate;
                     if (needsDate && !newDueDate) {
                         const d = new Date();
@@ -242,58 +264,22 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
             </div>
           </div>
 
-          <div className="space-y-4 pt-4 border-t border-gray-100">
-             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">עזרים חכמים</label>
-             <div className="grid gap-3">
-               {!isFileOnly && (
-                 <button 
-                  onClick={async () => {
-                    if (!draftMaterial.title) return;
-                    setLoading(true);
-                    try {
-                      if (isTest) {
-                        const total = aiMcqCount + aiOpenCount;
-                        const defaultSubject = classrooms[0]?.subject || Subject.MATH;
-                        const qs = await generateQuestions(defaultSubject, selectedGrade, draftMaterial.title, [], total, 'MEDIUM', aiMcqCount, aiOpenCount);
-                        setDraftMaterial(prev => ({...prev, questions: qs}));
-                      } else {
-                        const defaultSubject = classrooms[0]?.subject || Subject.MATH;
-                        const content = await generateSummary(defaultSubject, selectedGrade, draftMaterial.title);
-                        setDraftMaterial(prev => ({...prev, content}));
-                      }
-                    } finally { setLoading(false); }
-                  }}
-                  disabled={loading || !draftMaterial.title}
-                  className="w-full p-4 rounded-2xl bg-gray-900 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-20"
-                 >
-                   {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-yellow-400" />}
-                   <span>ייצר תוכן AI</span>
-                 </button>
-               )}
-             </div>
-          </div>
-
-          <div className="space-y-4 pt-4 border-t border-gray-100">
-             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">שכבת לימוד (רמה)</label>
-             <div className="relative">
-                <select 
-                  value={selectedGrade}
-                  onChange={(e) => setSelectedGrade(e.target.value as Grade)}
-                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-black text-sm outline-none focus:border-primary transition-all appearance-none cursor-pointer"
-                >
-                  {Object.values(Grade).map(g => <option key={g} value={g}>{g}</option>)}
-                </select>
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                  <ChevronDown size={18} />
-                </div>
-             </div>
-             <p className="text-[10px] text-gray-400 font-bold px-2 italic">רמת ה-AI תותאם לשכבה הנבחרת</p>
-          </div>
+          {(isTest || isAssignment || isUpcoming) && (
+            <div className="space-y-4 pt-4 border-t border-gray-100">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">תאריך יעד / מבחן</label>
+                <input 
+                  type="date" 
+                  value={draftMaterial.dueDate || ''} 
+                  onChange={(e) => setDraftMaterial(prev => ({...prev, dueDate: e.target.value}))} 
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-sm outline-none focus:border-primary transition-all"
+                />
+            </div>
+          )}
 
           {isTest && (
             <div className="space-y-6 pt-4 border-t border-gray-100">
               <div className="space-y-4">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">הגדרות מבחן (AI)</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">הגדרות שאלות (AI)</label>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
                     <span className="text-[10px] font-black text-gray-400 block mb-1">אמריקאיות</span>
@@ -305,49 +291,38 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                   </div>
                 </div>
               </div>
-
-              <div className="space-y-4">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">שיטת בדיקה וציון</label>
-                  <div className="grid gap-2">
-                      <button 
-                        onClick={() => setDraftMaterial(prev => ({...prev, autoGradeByAI: true}))}
-                        className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all text-right ${draftMaterial.autoGradeByAI ? 'border-primary bg-blue-50 text-primary font-black shadow-sm' : 'border-gray-50 text-gray-400 font-bold'}`}
-                      >
-                          <div className="flex items-center gap-3">
-                              <Bot size={18}/>
-                              <div className="text-right">
-                                  <span className="block text-sm">בדיקת AI</span>
-                              </div>
-                          </div>
-                          {draftMaterial.autoGradeByAI && <CheckCircle2 size={16}/>}
-                      </button>
-                      <button 
-                        onClick={() => setDraftMaterial(prev => ({...prev, autoGradeByAI: false}))}
-                        className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all text-right ${!draftMaterial.autoGradeByAI ? 'border-primary bg-blue-50 text-primary font-black shadow-sm' : 'border-gray-50 text-gray-400 font-bold'}`}
-                      >
-                          <div className="flex items-center gap-3">
-                              <UserIcon size={18}/>
-                              <div className="text-right">
-                                  <span className="block text-sm">בדיקת מורה</span>
-                              </div>
-                          </div>
-                          {!draftMaterial.autoGradeByAI && <CheckCircle2 size={16}/>}
-                      </button>
-                  </div>
-              </div>
             </div>
           )}
 
-          {(isTest || isAssignment) && (
-            <div className="space-y-4 pt-4 border-t border-gray-100">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">תאריך יעד אחרון</label>
-                <input 
-                  type="date" 
-                  value={draftMaterial.dueDate || ''} 
-                  onChange={(e) => setDraftMaterial(prev => ({...prev, dueDate: e.target.value}))} 
-                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-sm outline-none focus:border-primary transition-all"
-                />
-            </div>
+          {!isFileOnly && !isUpcoming && (
+             <div className="space-y-4 pt-4 border-t border-gray-100">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pr-2">עזרים חכמים (AI)</label>
+                <button 
+                 onClick={async () => {
+                   if (!draftMaterial.title) return;
+                   setLoading(true);
+                   try {
+                     if (isTest) {
+                       const total = aiMcqCount + aiOpenCount;
+                       const defaultSubject = classrooms[0]?.subject || Subject.MATH;
+                       const defaultGrade = classrooms[0]?.grade || Grade.GRADE_10;
+                       const qs = await generateQuestions(defaultSubject, defaultGrade, draftMaterial.title, [], total, 'MEDIUM', aiMcqCount, aiOpenCount);
+                       setDraftMaterial(prev => ({...prev, questions: qs}));
+                     } else {
+                       const defaultSubject = classrooms[0]?.subject || Subject.MATH;
+                       const defaultGrade = classrooms[0]?.grade || Grade.GRADE_10;
+                       const content = await generateSummary(defaultSubject, defaultGrade, draftMaterial.title);
+                       setDraftMaterial(prev => ({...prev, content}));
+                     }
+                   } finally { setLoading(false); }
+                 }}
+                 disabled={loading || !draftMaterial.title}
+                 className="w-full p-4 rounded-2xl bg-gradient-to-br from-gray-900 to-black text-white font-black text-xs flex items-center justify-center gap-2 shadow-xl hover:-translate-y-1 transition-all disabled:opacity-20"
+                >
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-yellow-400" />}
+                  <span>ייצר תוכן עם AI</span>
+                </button>
+             </div>
           )}
         </div>
 
@@ -357,7 +332,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
               type="text" 
               value={draftMaterial.title}
               onChange={e => setDraftMaterial(prev => ({...prev, title: e.target.value}))}
-              placeholder={isFileOnly ? "כותרת לקובץ..." : "כותרת התוכן..."}
+              placeholder={isFileOnly ? "כותרת לקובץ (אופציונלי)..." : "כותרת התוכן..."}
               className="w-full bg-transparent border-none text-5xl font-black text-gray-900 placeholder:text-gray-200 outline-none"
             />
 
@@ -366,7 +341,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                     <div className="bg-blue-50 p-8 rounded-full text-blue-500"><Upload size={64}/></div>
                     <div>
                         <h3 className="text-3xl font-black text-gray-800">העלאת קובץ גלובלי</h3>
-                        <p className="text-gray-400 font-bold text-lg mt-2">הקובץ יישמר ותוכל לשייך אותו לכיתות השונות.</p>
+                        <p className="text-gray-400 font-bold text-lg mt-2">תוכל לבחור לאילו כיתות לשייך את הקובץ בסיום.</p>
                     </div>
                     <button onClick={() => fileInputRef.current?.click()} className="bg-gray-900 text-white px-12 py-4 rounded-2xl font-black text-xl shadow-xl hover:bg-black transition-all">בחר קובץ להעלאה</button>
                     <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
@@ -382,7 +357,8 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                 </div>
                 <div className="space-y-6">
                   {draftMaterial.questions?.map((q, i) => {
-                    const anyOptionExpanded = q.options?.some((_, oi) => expandedOptionMap[`${q.id}-${oi}`]) || false;
+                    const anyOptionExpanded = q.options.some((_, oi) => expandedOptionMap[`${q.id}-${oi}`]);
+
                     return (
                       <div key={q.id} className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 relative group animate-fade-in">
                         <button onClick={() => setDraftMaterial(prev => ({...prev, questions: prev.questions?.filter(item => item.id !== q.id)}))} className="absolute top-6 left-6 text-gray-200 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
@@ -393,6 +369,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                             onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].text = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
                             placeholder="כתוב את השאלה כאן..." 
                             isTextarea
+                            subject={currentContextSubject}
                           />
                         </div>
                         {q.type === 'OPEN' ? (
@@ -403,11 +380,12 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                               onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].modelAnswer = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
                               placeholder="תשובת מודל..." 
                               isTextarea
+                              subject={currentContextSubject}
                             />
                           </div>
                         ) : (
                           <div className={`grid gap-4 transition-all duration-300 ${anyOptionExpanded ? 'grid-cols-1' : 'md:grid-cols-2'}`}>
-                            {(q.options || []).map((opt, oi) => (
+                            {q.options.map((opt, oi) => (
                               <div key={oi} className={`flex items-start gap-3 p-3 rounded-2xl border-2 transition-all ${q.correctIndex === oi ? 'border-green-500 bg-green-50' : 'border-gray-50'} ${expandedOptionMap[`${q.id}-${oi}`] ? 'col-span-full' : ''}`}>
                                 <input type="radio" className="mt-4" checked={q.correctIndex === oi} onChange={() => { const newQs = [...draftMaterial.questions!]; newQs[i].correctIndex = oi; setDraftMaterial(prev => ({...prev, questions: newQs})); }} />
                                 <div className="flex-1">
@@ -416,6 +394,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                                     onToggle={(expanded) => setExpandedOptionMap(prev => ({...prev, [`${q.id}-${oi}`]: expanded}))}
                                     onChange={text => { const newQs = [...draftMaterial.questions!]; newQs[i].options[oi] = text; setDraftMaterial(prev => ({...prev, questions: newQs})); }} 
                                     placeholder={`אופציה ${oi+1}`} 
+                                    subject={currentContextSubject}
                                   />
                                 </div>
                               </div>
@@ -429,11 +408,11 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
               </div>
             ) : (
               <RichEditor 
-                ref={editorRef}
                 value={draftMaterial.content || ''} 
                 onChange={content => setDraftMaterial(prev => ({...prev, content}))} 
                 placeholder="כתוב כאן את תוכן התוכן שיוצג לתלמידים..." 
                 showGuide={true}
+                subject={currentContextSubject}
               />
             )}
           </div>
@@ -469,6 +448,7 @@ const GlobalContentEditor: React.FC<GlobalContentEditorProps> = ({ user, onClose
                  <div className="text-center py-20 flex flex-col items-center gap-4">
                    <School size={48} className="text-gray-200" />
                    <p className="text-gray-400 font-bold">לא נמצאו כיתות המשויכות אליך.</p>
+                   <p className="text-xs text-gray-400">ודא שהקמת כיתות בדף הבית לפני הפרסום.</p>
                  </div>
                ) : filteredClassrooms.length === 0 ? (
                  <div className="text-center py-10 text-gray-400 font-bold">לא נמצאו כיתות תואמות לחיפוש</div>

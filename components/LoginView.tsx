@@ -1,9 +1,11 @@
 
-import React, { useState } from 'react';
-import { GraduationCap, User, BookOpen, Presentation, Mail, Lock, UserPlus, LogIn, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { GraduationCap, User, ArrowRight, BookOpen, Presentation, Mail, Lock, UserPlus, LogIn, AlertCircle, UserCircle, Loader2 } from 'lucide-react';
 import { User as UserType, UserRole } from '../types';
 
 const USERS_DB_KEY = 'lumdim_users_database';
+// הערה: יש להחליף את זה ב-Client ID האמיתי שלך מ-Google Cloud Console
+const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
 
 interface LoginViewProps {
   onLogin: (user: UserType) => void;
@@ -16,6 +18,75 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('STUDENT');
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // פונקציה לפענוח ה-JWT שגוגל מחזירה ללא ספריות חיצוניות
+  const parseJwt = (token: string) => {
+    try {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      return JSON.parse(jsonPayload);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const handleCallbackResponse = (response: any) => {
+    setIsLoading(true);
+    const userObject = parseJwt(response.credential);
+    
+    if (userObject) {
+      const googleUser: UserType = {
+        id: 'google-' + userObject.sub,
+        name: userObject.name,
+        email: userObject.email,
+        role: 'STUDENT', // ברירת מחדל למתחברים חברתית
+        provider: 'google',
+        photoUrl: userObject.picture
+      };
+      
+      // שמירה במאגר המשתמשים המקומי אם לא קיים
+      const users = getUsers();
+      if (!users.some(u => u.email === googleUser.email)) {
+        localStorage.setItem(USERS_DB_KEY, JSON.stringify([...users, googleUser]));
+      }
+
+      setTimeout(() => {
+        onLogin(googleUser);
+        setIsLoading(false);
+      }, 500);
+    } else {
+      setError("שגיאה בהתחברות עם Google");
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    /* global google */
+    if (typeof window !== 'undefined' && (window as any).google) {
+      const google = (window as any).google;
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleCallbackResponse,
+        cancel_on_tap_outside: false
+      });
+
+      google.accounts.id.renderButton(
+        document.getElementById("googleSignInDiv"),
+        { 
+          theme: "outline", 
+          size: "large", 
+          width: "100%",
+          text: "continue_with",
+          shape: "pill",
+          locale: "he"
+        }
+      );
+    }
+  }, []);
 
   const getUsers = (): UserType[] => {
     const data = localStorage.getItem(USERS_DB_KEY);
@@ -94,6 +165,22 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
             {mode === 'LOGIN' ? 'ברוך השב ללמידה חכמה' : 'הצטרף לקהילת הלומדים שלנו'}
           </p>
 
+          {/* Real Google Login Button Container */}
+          <div className="mb-6 relative">
+            {isLoading && (
+              <div className="absolute inset-0 bg-white/80 z-20 flex items-center justify-center rounded-2xl">
+                 <Loader2 className="animate-spin text-primary" size={24} />
+              </div>
+            )}
+            <div id="googleSignInDiv" className="w-full"></div>
+          </div>
+
+          <div className="flex items-center gap-4 mb-6">
+            <div className="flex-1 h-px bg-gray-100"></div>
+            <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">או באמצעות אימייל</span>
+            <div className="flex-1 h-px bg-gray-100"></div>
+          </div>
+
           {error && (
             <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl flex items-center gap-3 text-sm font-bold animate-shake">
               <AlertCircle size={20} />
@@ -115,7 +202,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                 <button
                   type="button"
                   onClick={() => setRole('TEACHER')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-black transition-all ${role === 'TEACHER' ? 'bg-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-black transition-all ${role === 'TEACHER' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   <Presentation size={18} />
                   <span className="text-sm">אני מורה</span>

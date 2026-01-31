@@ -1,5 +1,7 @@
 {
   "name": "Lumdim app",
   "description": "הפלטפורמה המתקדמת ביותר ללמידה ותרגול מבוססת בינה מלאכותית. מורה פרטי צמוד, הכנה למבחנים וניהול כיתה חכם.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }
